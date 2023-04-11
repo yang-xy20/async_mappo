@@ -11,7 +11,6 @@ from onpolicy.algorithms.utils.mlp import MLPBase, MLPLayer
 from onpolicy.algorithms.utils.mix import MIXBase
 from onpolicy.algorithms.utils.rnn import RNNLayer
 from onpolicy.algorithms.utils.act import ACTLayer
-from onpolicy.algorithms.utils.popart import PopArt
 from onpolicy.utils.util import get_shape_from_obs_space
 
 class R_Actor(nn.Module):
@@ -25,8 +24,6 @@ class R_Actor(nn.Module):
         self._use_policy_active_masks = args.use_policy_active_masks 
         self._use_naive_recurrent_policy = args.use_naive_recurrent_policy
         self._use_recurrent_policy = args.use_recurrent_policy
-        self._use_influence_policy = args.use_influence_policy
-        self._influence_layer_N = args.influence_layer_N 
         self._use_policy_vhead = args.use_policy_vhead 
         self._recurrent_N = args.recurrent_N 
         self._grid_goal = args.grid_goal
@@ -47,21 +44,13 @@ class R_Actor(nn.Module):
             self.rnn = RNNLayer(input_size, self.hidden_size, self._recurrent_N, self._use_orthogonal)
             input_size = self.hidden_size
 
-        if self._use_influence_policy:
-            self.mlp = MLPLayer(obs_shape[0], self.hidden_size,
-                              self._influence_layer_N, self._use_orthogonal, self._activation_id)
-            input_size += self.hidden_size
-
         self.act = ACTLayer(action_space, input_size, self._use_orthogonal, self._gain, args=args)
 
         if self._use_policy_vhead:
             init_method = [nn.init.xavier_uniform_, nn.init.orthogonal_][self._use_orthogonal]
             def init_(m): 
                 return init(m, init_method, lambda x: nn.init.constant_(x, 0))
-            if self._use_popart:
-                self.v_out = init_(PopArt(input_size, 1, device=device))
-            else:
-                self.v_out = init_(nn.Linear(input_size, 1))
+            self.v_out = init_(nn.Linear(input_size, 1))
 
         self.to(device)
 
@@ -84,13 +73,6 @@ class R_Actor(nn.Module):
                 actor_features[0], rnn_states = self.rnn(actor_features[0], rnn_states, masks)
             else:
                 actor_features, rnn_states = self.rnn(actor_features, rnn_states, masks)
-
-        if self._use_influence_policy:
-            mlp_obs = self.mlp(obs)
-            if self._grid_goal:
-                actor_features[0] = torch.cat([actor_features[0], mlp_obs], dim=1)
-            else:
-                actor_features = torch.cat([actor_features, mlp_obs], dim = 1)
 
         actions, action_log_probs = self.act(actor_features, available_actions, deterministic)
         
@@ -121,13 +103,6 @@ class R_Actor(nn.Module):
             else:
                 actor_features, rnn_states = self.rnn(actor_features, rnn_states, masks)
 
-        if self._use_influence_policy:
-            mlp_obs = self.mlp(obs)
-            if self._grid_goal:
-                actor_features[0] = torch.cat([actor_features[0], mlp_obs], dim=1)
-            else:
-                actor_features = torch.cat([actor_features, mlp_obs], dim = 1)
-
         action_log_probs, dist_entropy = self.act.evaluate_actions(actor_features, action, available_actions, active_masks = active_masks if self._use_policy_active_masks else None)
 
         values = self.v_out(actor_features) if self._use_policy_vhead else None
@@ -147,10 +122,6 @@ class R_Actor(nn.Module):
 
         if self._use_naive_recurrent_policy or self._use_recurrent_policy:
             actor_features, rnn_states = self.rnn(actor_features, rnn_states, masks)
-
-        if self._use_influence_policy:
-            mlp_obs = self.mlp(obs)
-            actor_features = torch.cat([actor_features, mlp_obs], dim=1)
         
         values = self.v_out(actor_features)
 
@@ -164,9 +135,6 @@ class R_Critic(nn.Module):
         self._activation_id = args.activation_id     
         self._use_naive_recurrent_policy = args.use_naive_recurrent_policy
         self._use_recurrent_policy = args.use_recurrent_policy
-        self._use_influence_policy = args.use_influence_policy
-        self._use_popart = args.use_popart
-        self._influence_layer_N = args.influence_layer_N
         self._recurrent_N = args.recurrent_N
         self._grid_goal = args.grid_goal
         self.tpdv = dict(dtype=torch.float32, device=device)
@@ -187,18 +155,10 @@ class R_Critic(nn.Module):
             self.rnn = RNNLayer(input_size, self.hidden_size, self._recurrent_N, self._use_orthogonal)
             input_size = self.hidden_size
 
-        if self._use_influence_policy:
-            self.mlp = MLPLayer(share_obs_shape[0], self.hidden_size,
-                              self._influence_layer_N, self._use_orthogonal, self._activation_id)
-            input_size += self.hidden_size
-
         def init_(m): 
             return init(m, init_method, lambda x: nn.init.constant_(x, 0))
 
-        if self._use_popart:
-            self.v_out = init_(PopArt(input_size, 1, device=device))
-        else:
-            self.v_out = init_(nn.Linear(input_size, 1))
+        self.v_out = init_(nn.Linear(input_size, 1))
 
         self.to(device)
 
@@ -218,10 +178,6 @@ class R_Critic(nn.Module):
 
         if self._use_naive_recurrent_policy or self._use_recurrent_policy:
             critic_features, rnn_states = self.rnn(critic_features, rnn_states, masks)
-
-        if self._use_influence_policy:
-            mlp_share_obs = self.mlp(share_obs)
-            critic_features = torch.cat([critic_features, mlp_share_obs], dim=1)
 
         values = self.v_out(critic_features)
 

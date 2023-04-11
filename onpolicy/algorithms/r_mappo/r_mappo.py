@@ -36,19 +36,12 @@ class R_MAPPO():
         self._use_max_grad_norm = args.use_max_grad_norm
         self._use_clipped_value_loss = args.use_clipped_value_loss
         self._use_huber_loss = args.use_huber_loss
-        self._use_popart = args.use_popart
         self._use_valuenorm = args.use_valuenorm
         self._use_value_active_masks = args.use_value_active_masks
         self._use_policy_active_masks = args.use_policy_active_masks
         self._use_policy_vhead = args.use_policy_vhead
         
-        assert (self._use_popart and self._use_valuenorm) == False, ("self._use_popart and self._use_valuenorm can not be set True simultaneously")
-        
-        if self._use_popart:
-            self.value_normalizer = self.policy.critic.v_out
-            if self._use_policy_vhead:
-                self.policy_value_normalizer = self.policy.actor.v_out
-        elif self._use_valuenorm:
+        if self._use_valuenorm:
             self.value_normalizer = ValueNorm(1, device = self.device)
             if self._use_policy_vhead:
                 self.policy_value_normalizer = ValueNorm(1, device = self.device)
@@ -60,7 +53,7 @@ class R_MAPPO():
     def cal_value_loss(self, value_normalizer, values, value_preds_batch, return_batch, active_masks_batch):
         value_pred_clipped = value_preds_batch + (values - value_preds_batch).clamp(-self.clip_param, self.clip_param)
         
-        if self._use_popart or self._use_valuenorm:
+        if self._use_valuenorm:
             value_normalizer.update(return_batch)
             error_clipped = value_normalizer.normalize(return_batch) - value_pred_clipped
             error_original = value_normalizer.normalize(return_batch) - values
@@ -154,7 +147,7 @@ class R_MAPPO():
         return value_loss, critic_grad_norm, policy_loss, dist_entropy, actor_grad_norm, ratio
 
     def train(self, buffer, turn_on=True):
-        if self._use_popart or self._use_valuenorm:
+        if self._use_valuenorm:
             advantages = buffer.returns[:-1] - self.value_normalizer.denormalize(buffer.value_preds[:-1])
         else:
             advantages = buffer.returns[:-1] - buffer.value_preds[:-1]
